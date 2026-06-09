@@ -1,0 +1,32 @@
+# Archivos Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+.DS_Store
+# -- Informes y PDF generados---
+# Ignorar cualquier informe en formato pdf y markdown. 
+*.pdf
+*.md
+# Configuración sensible (API keys)
+.env
+
+# IDEs
+.vscode/
+.idea/
+# Logs # para no subir logs a github
+*.log
+# Que no guarde las carpetas de pruebas o informes 
+salidas_de_informes/
+archivos_prueba_chunking/
+auditoria_chunks/
+#
+debug_proyecto.log
+contexto_para_llm.txt
+RESUMENES_MAP.md
+desktop.ini
+echo "contexto_para_llm.txt"
