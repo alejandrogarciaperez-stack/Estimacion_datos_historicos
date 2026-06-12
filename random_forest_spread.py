@@ -4,7 +4,7 @@ Random Forest Regressor - Predicción de Spread (spread_pct)
 Dataset: contratos_sinteticos.csv
 Variable objetivo: spread_pct
 """
-
+import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -22,6 +22,7 @@ from sklearn.metrics import (
     r2_score,
     mean_absolute_percentage_error
 )
+from config import DB_DIR, ANALYSIS_DIR
 from sklearn.inspection import permutation_importance
 import warnings
 warnings.filterwarnings("ignore")
@@ -33,50 +34,51 @@ print("=" * 60)
 print("  RANDOM FOREST REGRESSOR — PREDICCIÓN DE SPREAD (%)")
 print("=" * 60)
 
-RUTA_CSV = r"C:\Proyectos\Empresa\Caso_Pedro\Base_de_datos\contratos_sinteticos.xlsx"
+RUTA_CSV = os.path.join(DB_DIR, "contratos_sinteticos_caos.xlsx")
 df = pd.read_excel(RUTA_CSV)
 
-print(f"\n▶ Dataset cargado: {df.shape[0]} filas × {df.shape[1]} columnas")
-print("\n— Primeras filas —")
+print(f"\n> Dataset cargado: {df.shape[0]} filas x {df.shape[1]} columnas")
+print("\n- Primeras filas -")
 print(df.head(5).to_string())
 
-print(f"\n— Información del dataset —")
+print(f"\n- Información del dataset -")
 print(df.info())
 
-print(f"\n— Valores nulos por columna —")
+print(f"\n- Valores nulos por columna -")
 print(df.isnull().sum())
 
-print(f"\n— Estadísticas descriptivas —")
+print(f"\n- Estadísticas descriptivas -")
 print(df.describe())
 
 # ─────────────────────────────────────────────
-# 2. PREPROCESAMIENTO
+# 2. PREPROCESAMIENTO En este caso es muy sencillo ya que se ha generado con datos limpios y sintéticos. 
 # ─────────────────────────────────────────────
 print("\n" + "=" * 60)
 print("  PREPROCESAMIENTO")
 print("=" * 60)
 
 # 2.1 Filtrar filas con spread_pct nulo (no podemos entrenar sin target)
-
 n_antes = len(df)
 df_clean = df.dropna(subset=["spread_pct"]).copy() # dropna elimina todas las filas que contienen al menos un valor nulo
 n_despues = len(df_clean)
-print(f"\n▶ Filas con spread_pct no nulo: {n_despues} (eliminadas {n_antes - n_despues})")
+print(f"\n> Filas con spread_pct no nulo: {n_despues} (eliminadas {n_antes - n_despues})")
 
 
-# 2.2 Gestión del Euribor: ambas columnas son mutuamente excluyentes según el arquetipo.
-#     Creamos una sola columna 'euribor_ref_pct' con el Euribor aplicable.
-#     Cuando ambas son NaN (ej. tarjetas, consumo fijo), ponemos NaN.
+# 2.2 Gestión del Euribor: en vez de utilizar dos columnas para cada Euribor, utilizamos una sola columna con el Euribor aplicable.
 df_clean["euribor_ref_pct"] = df_clean["euribor_12m_pct"].fillna(
     df_clean["euribor_3m_pct"]
 ).fillna(np.nan)
 
-# Indicador del tipo de índice de referencia
+# Indicador del tipo de índice de referencia. Variable tipo dummy. SI o NO. 
 df_clean["tiene_euribor_12m"] = df_clean["euribor_12m_pct"].notna().astype(int)
 df_clean["tiene_euribor_3m"]  = df_clean["euribor_3m_pct"].notna().astype(int)
 
 
-# 2.4 Definir features y target
+# 2.3 Definir features y target
+
+#Descartamos el TIE porque hemos obtenido el spread del tie, por lo que estaríamos añadiendo ruido.
+# Descartamos el euribor, dado que lo hemos utilizado para calcular el spread. 
+ 
 FEATURES = [
     "contract_month",
     "client_segment_id",
@@ -85,10 +87,7 @@ FEATURES = [
     "family_id",
     "counterpart_id",
     "contract_collateral_type",
-    "local_curr_orig_risk_amount",
-    "euribor_ref_pct", 
-    "tiene_euribor_12m", # Sin variables que indican si tienen o no este eruibor. 
-    "tiene_euribor_3m",
+    "local_curr_orig_risk_amount"
 ]
 
 TARGET = "spread_pct"
@@ -96,18 +95,18 @@ TARGET = "spread_pct"
 X = df_clean[FEATURES]
 y = df_clean[TARGET]
 
-print(f"\n▶ Features utilizadas ({len(FEATURES)}): {FEATURES}")
-print(f"▶ Variable objetivo: '{TARGET}'")
-print(f"▶ Distribución del target:")
+print(f"\n> Features utilizadas ({len(FEATURES)}): {FEATURES}")
+print(f"> Variable objetivo: '{TARGET}'")
+print(f"> Distribución del target:")
 print(f"  Media: {y.mean():.4f}% | Std: {y.std():.4f}% | Min: {y.min():.4f}% | Max: {y.max():.4f}%")
 
 # ─────────────────────────────────────────────
-# 3. SPLIT TRAIN / TEST
+# 3. SPLIT TRAIN / TEST Para validar los resultados, utilizamos el 30% de los datos para testear y el 70% para entrenar
 # ─────────────────────────────────────────────
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.3, random_state=42
 )
-print(f"\n▶ Split 70/30 → Train: {len(X_train)} muestras | Test: {len(X_test)} muestras")
+print(f"\n> Split 70/30 -> Train: {len(X_train)} muestras | Test: {len(X_test)} muestras")
 
 # ─────────────────────────────────────────────
 # 3.5 PREPROCESAMIENTO (Buenas Prácticas para evitar Data Leakage)
@@ -123,8 +122,10 @@ print("\n" + "=" * 60)
 print("  ENTRENAMIENTO — RANDOM FOREST REGRESSOR")
 print("=" * 60)
 
-# El Pipeline asegura que la codificación y la imputación ocurran dentro del CV
-# Imputación de variables numéricas con la mediana
+# El Pipeline asegura que la codificación y la imputación ocurran dentro del CV en el caso de tener Observaciones 
+#nulas. No tenemos pero quería repasar cómo se hacía esto. 
+
+# Imputación de variables numéricas con la mediana porque 
 numeric_transformer = Pipeline(steps=[
     ('imputer', SimpleImputer(strategy='median'))
 ])
@@ -151,26 +152,26 @@ pipeline_rf = Pipeline(steps=[
 param_grid = {
     'regressor__bootstrap': [True],
     'regressor__n_estimators': [50,100, 200], # n_estimators es el número de árboles que se van a entrenar
-    'regressor__max_depth': [2,4,6,8,10,12,14,20,30], # max_depth es la profundidad máxima de los árboles
-    'regressor__max_features': [2,4,6], # max_features es el número de características que se van a utilizar para entrenar los árboles
-    'regressor__min_samples_split': [10, 20, 50, 100], # min_samples_split es el número mínimo de observaciones que debe tener un nodo internoi para poder dividirse en dos.
-    'regressor__min_samples_leaf': [5, 10, 25, 50,]# min_samples_leaf es el número mínimo de observaciones que debe contener un nodo hoja. Es el nodo final, que repsenta la decisión, predicción, o resultado final. 
+    'regressor__max_depth': [2,4,6,8,10,12,14], # max_depth es la profundidad máxima de los árboles
+    'regressor__max_features': [2,4,6,8], # max_features es el número de características que se van a utilizar para entrenar los árboles
+    'regressor__min_samples_split': [10, 20, 50, 70], # min_samples_split es el número mínimo de observaciones que debe tener un nodo internoi para poder dividirse en dos.
+    'regressor__min_samples_leaf': [5, 10, 25, 50,75]# min_samples_leaf es el número mínimo de observaciones que debe contener un nodo hoja. Es el nodo final, que repsenta la decisión, predicción, o resultado final. 
 }
 
 # Grid search para encontrar los mejores hiperparámetros
 grid_search = GridSearchCV(
     estimator=pipeline_rf,
     param_grid=param_grid,
-    scoring='neg_mean_absolute_error', # scoring es la métrica que se va a utilizar para evaluar el modelo
+    scoring='neg_mean_absolute_error', # Es el MSE, pero en negativo para que funcione con GridSearchCV
     cv=5, # cv es el número de k-fold que se van a utilizar para evaluar el modelo
-    n_jobs=-1,
-    verbose=2
+    n_jobs=-1, # n_jobs es el número de núcleos de CPU que se van a utilizar para evaluar el modelo
+    verbose=2 # verbose es el nivel de detalle que se va a mostrar en la consola
 )
 
 # Grid search para encontrar los mejores hiperparámetros
 grid_search.fit(X_train, y_train)
 
-# ¡CORRECCIÓN CRÍTICA! Extraemos el mejor modelo
+# Extraemos el mejor modelo
 best_model = grid_search.best_estimator_
 best_rf = best_model.named_steps['regressor'] # El Random Forest puro
 
@@ -223,7 +224,7 @@ importances = pd.Series(best_rf.feature_importances_, index=feature_names_out).s
 # Tomamos el top 15 para no saturar gráficos si hay mucho One-Hot Encoding
 top_importances = importances.head(15) 
 
-print("\n  [Top 15 Importancia de Variables — MDI]")
+print("\n  [Top 15 Importancia de Variables - MDI]")
 print(top_importances.round(6).to_string())
 
 # Permutation importance (sobre el best_model completo para que haga el preprocesamiento)
@@ -268,7 +269,7 @@ plt.rcParams.update({
 
 fig = plt.figure(figsize=(20, 22), facecolor=COLOR_BG)
 fig.suptitle(
-    "Random Forest Regressor — Predicción de Spread (%)\nContratos Sintéticos",
+    "Random Forest Regressor - Predicción de Spread (%)\nContratos Sintéticos",
     fontsize=18, fontweight="bold", color=COLOR_TEXT, y=0.98
 )
 
@@ -290,7 +291,7 @@ ax2.scatter(y_test, y_pred_test, alpha=0.55, s=22, color=COLOR_SECONDARY, edgeco
 lims = [min(y_test.min(), y_pred_test.min()) - 0.1,
         max(y_test.max(), y_pred_test.max()) + 0.1]
 ax2.plot(lims, lims, color=COLOR_ACCENT, linewidth=2, linestyle="--", label="Predicción perfecta")
-ax2.set_title(f"Real vs Predicho (Test) — R²={m_test['R2']:.4f}", fontweight="bold", pad=10)
+ax2.set_title(f"Real vs Predicho (Test) - R²={m_test['R2']:.4f}", fontweight="bold", pad=10)
 ax2.set_xlabel("spread_pct Real (%)")
 ax2.set_ylabel("spread_pct Predicho (%)")
 ax2.legend(fontsize=9)
@@ -371,7 +372,7 @@ for (row, col), cell in tabla.get_celld().items():
     cell.set_edgecolor(COLOR_GRID)
 ax7.set_title("Resumen de Métricas", fontweight="bold", pad=15)
 
-plt.show()
+# plt.show()
 
 # ─────────────────────────────────────────────
 # 8. RESUMEN FINAL
@@ -411,17 +412,3 @@ print(f"""
 
   Feature MDI más importante : {top_importances.index[0]} ({top_importances.iloc[0]:.4f})
   Feature Perm más importante: {perm_df.iloc[0]['feature']} ({perm_df.iloc[0]['importance_mean']:.4f}""")
-
-
-import joblib
-import os
-
-# Asegúrate de que la carpeta existe
-ruta_directorio = r"C:\Proyectos\Empresa\Caso_Pedro\Analisis"
-os.makedirs(ruta_directorio, exist_ok=True)
-
-# Guardar el pipeline completo
-ruta_modelo = os.path.join(ruta_directorio, "mejor_pipeline_rf.pkl")
-joblib.dump(best_model, ruta_modelo)
-print(f"\n▶ Modelo optimizado exportado exitosamente en: {ruta_modelo}")
-
